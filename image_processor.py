@@ -92,12 +92,23 @@ def add_logo_outline(logo: Image.Image, stroke_width: int = 2, stroke_color: tup
 def resize_logo_by_width(logo: Image.Image, base_width: int, width_percent: float) -> Image.Image:
     """
     ロゴを画像横幅に対するパーセンテージでリサイズ
-    width_percent: 0.2 〜 0.4 (20%〜40%)
+    width_percent: 0.15 〜 0.4 (15%〜40%、推奨15%)
     """
     target_width = int(base_width * width_percent)
     ratio = target_width / logo.width
     new_h = int(logo.height * ratio)
     return logo.resize((target_width, new_h), Image.Resampling.LANCZOS)
+
+
+def apply_logo_opacity(logo: Image.Image, opacity: float) -> Image.Image:
+    """ロゴに不透明度を適用（0.0〜1.0）"""
+    if opacity >= 1.0:
+        return logo
+    logo = logo.convert("RGBA")
+    r, g, b, a = logo.split()
+    a = a.point(lambda x: int(x * opacity))
+    logo.putalpha(a)
+    return logo
 
 
 def paste_logo(
@@ -107,12 +118,15 @@ def paste_logo(
     margin_percent: float = 0.03,
     custom_x_percent: float | None = None,
     custom_y_percent: float | None = None,
+    offset_x: int = 0,
+    offset_y: int = 0,
 ) -> Image.Image:
     """
     ベース画像にロゴを合成
     position: "bottom_right", "bottom_left", "top_right", "top_left", "custom"
     margin_percent: 余白（画像サイズに対する割合、デフォルト3%）
     custom_x_percent, custom_y_percent: position="custom" 時の位置（0〜100、0=左/上、100=右/下）
+    offset_x, offset_y: 位置微調整用のピクセルオフセット（右・下が正）
     """
     base = base_img.copy()
     logo = logo.convert("RGBA")
@@ -121,11 +135,8 @@ def paste_logo(
     margin = int(min(bw, bh) * margin_percent)
 
     if position == "custom" and custom_x_percent is not None and custom_y_percent is not None:
-        # 0=左端/上端、100=右端/下端（ロゴの左上座標）
         x = int((bw - lw) * custom_x_percent / 100)
         y = int((bh - lh) * custom_y_percent / 100)
-        x = max(0, min(bw - lw, x))
-        y = max(0, min(bh - lh, y))
     elif position == "bottom_right":
         x = bw - lw - margin
         y = bh - lh - margin
@@ -139,6 +150,9 @@ def paste_logo(
         x = margin
         y = margin
 
+    x = max(0, min(bw - lw, x + offset_x))
+    y = max(0, min(bh - lh, y + offset_y))
+
     base.paste(logo, (x, y), logo)
     return base
 
@@ -147,14 +161,18 @@ def process_image(
     image_source: bytes | Path | Image.Image,
     size_preset: tuple[int, int],
     logo: Image.Image | None = None,
-    logo_width_percent: float = 0.25,
+    logo_width_percent: float = 0.15,
     logo_position: str = "bottom_right",
     logo_custom_x: float | None = None,
     logo_custom_y: float | None = None,
+    logo_offset_x: int = 0,
+    logo_offset_y: int = 0,
+    logo_opacity: float = 1.0,
 ) -> Image.Image:
     """
     画像を加工して返す
     image_source: 画像データ（bytes, パス, またはPIL Image）
+    logo_opacity: ロゴの不透明度（0.0〜1.0）
     """
     if isinstance(image_source, Image.Image):
         img = image_source
@@ -168,7 +186,7 @@ def process_image(
 
     if logo is not None:
         logo_resized = resize_logo_by_width(logo, target_w, logo_width_percent)
-        # 縁取りを追加して背景に溶け込まないようにする（内側に黒、外側に白）
+        logo_resized = apply_logo_opacity(logo_resized, logo_opacity)
         logo_resized = add_logo_outline(logo_resized, stroke_width=1, stroke_color=(0, 0, 0))
         logo_resized = add_logo_outline(logo_resized, stroke_width=2, stroke_color=(255, 255, 255))
         result = paste_logo(
@@ -177,6 +195,8 @@ def process_image(
             logo_position,
             custom_x_percent=logo_custom_x,
             custom_y_percent=logo_custom_y,
+            offset_x=logo_offset_x,
+            offset_y=logo_offset_y,
         )
 
     # 縦型（スマホ表示）の場合は明るさ・コントラストを補正

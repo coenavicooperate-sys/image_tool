@@ -17,6 +17,14 @@ playwright install chromium
 streamlit run app.py
 ```
 
+### 同じネットワーク内の他の端末からアクセスする場合
+
+```bash
+streamlit run app.py --server.address=0.0.0.0
+```
+
+起動後、同じWi-Fi内のスマホやタブレットから `http://あなたのPCのIP:8501` でアクセスできます。
+
 ---
 
 ## クラウド公開（誰でもWebで使えるようにする）
