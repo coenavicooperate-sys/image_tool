@@ -5,6 +5,7 @@
 
 import io
 import json
+import os
 import subprocess
 import sys
 import zipfile
@@ -14,11 +15,20 @@ import requests
 import streamlit as st
 from PIL import Image
 
+from dotenv import load_dotenv
 from image_processor import LOGO_POSITIONS, SIZE_PRESETS, process_image, save_as_webp
+
+load_dotenv()
 
 st.set_page_config(page_title="店舗写真加工ツール", page_icon="📷", layout="wide")
 
-# session_state 初期化（再読み込みでデータが消えないように）
+# 認証用（環境変数 IMAGE_TOOL_USERNAME, IMAGE_TOOL_PASSWORD で設定）
+AUTH_USERNAME = os.environ.get("IMAGE_TOOL_USERNAME", "")
+AUTH_PASSWORD = os.environ.get("IMAGE_TOOL_PASSWORD", "")
+
+# session_state 初期化
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
 if "extracted_photos" not in st.session_state:
     st.session_state.extracted_photos = []
 if "selected_indices" not in st.session_state:
@@ -36,7 +46,7 @@ def _fetch_image_bytes_inner(url: str, headers: dict) -> bytes | None:
     try:
         r = requests.get(url, timeout=20, headers=headers)
         r.raise_for_status()
-        if len(r.content) < 500:  # 空やエラーページの可能性
+        if len(r.content) < 500:
             return None
         return r.content
     except Exception:
@@ -56,7 +66,6 @@ def fetch_image_bytes(url: str, fallback_url: str | None = None) -> bytes | None
     data = _fetch_image_bytes_inner(url, headers)
     if data:
         return data
-    # 高画質URLが失敗した場合、元のサムネイルURLを試す
     if fallback_url and fallback_url != url:
         return _fetch_image_bytes_inner(fallback_url, headers)
     return None
@@ -92,7 +101,32 @@ def extract_photos_via_subprocess(url: str) -> tuple[list[dict], str | None]:
         return [], str(e)
 
 
+def show_login_page() -> bool:
+    """ログイン画面を表示。認証成功で True を返す"""
+    if not AUTH_USERNAME or not AUTH_PASSWORD:
+        return True
+    if st.session_state.authenticated:
+        return True
+
+    st.title("🔐 ログイン")
+    st.caption("関係者のみアクセスできます")
+    with st.form("login_form"):
+        username = st.text_input("ID（ユーザー名）")
+        password = st.text_input("パスワード", type="password")
+        submitted = st.form_submit_button("ログイン")
+        if submitted:
+            if username == AUTH_USERNAME and password == AUTH_PASSWORD:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("ID または パスワードが正しくありません")
+    return False
+
+
 def main():
+    if not show_login_page():
+        return
+
     st.title("📷 店舗写真 抽出・選択・一括加工")
     st.caption("ホットペッパー / 食べログのURLから写真を取得し、SNS用に加工できます")
 
@@ -148,6 +182,10 @@ def main():
         else:
             logo_position = LOGO_POSITIONS[logo_pos_label]
 
+        if AUTH_USERNAME and AUTH_PASSWORD and st.button("🚪 ログアウト", key="logout_btn"):
+            st.session_state.authenticated = False
+            st.rerun()
+
     # ========== STEP 1: 写真抽出 ==========
     st.header("STEP 1: 写真の抽出")
     url_input = st.text_input(
@@ -178,7 +216,7 @@ def main():
         st.info("URLを入力して「写真を抽出」をクリックしてください")
         return
 
-    # ========== 選択用チェックボックス付き一覧 ==========
+    # ========== STEP 2: 選択用チェックボックス付き一覧 ==========
     st.header("STEP 2: 写真の選択")
     st.caption("加工する写真を選択してください（全選択/全解除も可能）")
 
@@ -216,7 +254,6 @@ def main():
                 except Exception:
                     st.caption("読み込みエラー")
 
-                # 全選択/全解除で key を削除するため、key が無い時は selected_indices から初期化
                 default = i in st.session_state.selected_indices
                 if f"photo_sel_{i}" not in st.session_state:
                     st.session_state[f"photo_sel_{i}"] = default
