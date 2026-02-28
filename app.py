@@ -208,7 +208,7 @@ def main():
                     st.session_state.extracted_photos = []
                 else:
                     st.session_state.extracted_photos = photos
-                    st.session_state.selected_indices = set(range(len(photos)))
+                    st.session_state.selected_indices = set()
                     st.success(f"{len(photos)} 枚の写真を取得しました")
 
     photos = st.session_state.extracted_photos
