@@ -17,14 +17,34 @@ SIZE_PRESETS = {
 WEBP_TARGET_BYTES = 100_000
 
 # 縦型画像（スマホ表示向け）の補正
-MOBILE_BRIGHTNESS = 1.12  # 若干明るく
-MOBILE_CONTRAST = 1.15   # コントラストを上げる
+MOBILE_BRIGHTNESS = 1.10   # 明るさ +10%
+MOBILE_CONTRAST = 1.10     # コントラスト +10%
+MOBILE_HIGHLIGHT_REDUCE = 0.05  # ハイライト 5%落とし
+
+
+def reduce_highlights(img: Image.Image, amount: float = 0.05) -> Image.Image:
+    """ハイライト（明るい部分）を指定割合で落とす"""
+    img = img.convert("RGB")
+    r, g, b = img.split()
+
+    def reduce_high(x: int) -> int:
+        if x <= 128:
+            return x
+        factor = (x - 128) / 127
+        reduction = int(255 * amount * factor)
+        return max(0, x - reduction)
+
+    r = r.point(reduce_high)
+    g = g.point(reduce_high)
+    b = b.point(reduce_high)
+    return Image.merge("RGB", (r, g, b))
 
 
 def enhance_for_mobile(img: Image.Image) -> Image.Image:
-    """スマホ表示向けに明るさ・コントラストを補正"""
+    """スマホ表示向けに明るさ・コントラスト・ハイライトを補正"""
     img = ImageEnhance.Brightness(img).enhance(MOBILE_BRIGHTNESS)
     img = ImageEnhance.Contrast(img).enhance(MOBILE_CONTRAST)
+    img = reduce_highlights(img, MOBILE_HIGHLIGHT_REDUCE)
     return img
 
 
