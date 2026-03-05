@@ -39,6 +39,8 @@ if "processed_size_choice" not in st.session_state:
     st.session_state.processed_size_choice = ""
 if "logo_img" not in st.session_state:
     st.session_state.logo_img = None
+if "image_cache" not in st.session_state:
+    st.session_state.image_cache = {}
 
 
 def _fetch_image_bytes_inner(url: str, headers: dict) -> bytes | None:
@@ -69,6 +71,18 @@ def fetch_image_bytes(url: str, fallback_url: str | None = None) -> bytes | None
     if fallback_url and fallback_url != url:
         return _fetch_image_bytes_inner(fallback_url, headers)
     return None
+
+
+def fetch_image_bytes_cached(url: str, fallback_url: str | None = None) -> bytes | None:
+    """URLから画像を取得（session_state にキャッシュして再利用）"""
+    cache = st.session_state.image_cache
+    cache_key = url
+    if cache_key not in cache:
+        data = fetch_image_bytes(url, fallback_url)
+        if data:
+            cache[cache_key] = data
+        return data
+    return cache[cache_key]
 
 
 def extract_photos_via_subprocess(url: str) -> tuple[list[dict], str | None]:
@@ -209,6 +223,7 @@ def main():
                 else:
                     st.session_state.extracted_photos = photos
                     st.session_state.selected_indices = set()
+                    st.session_state.image_cache = {}
                     st.success(f"{len(photos)} 枚の写真を取得しました")
 
     photos = st.session_state.extracted_photos
@@ -242,7 +257,7 @@ def main():
                 break
             with cols[col_idx]:
                 try:
-                    img_data = fetch_image_bytes(
+                    img_data = fetch_image_bytes_cached(
                         photos[i]["url"],
                         fallback_url=photos[i].get("thumb_url"),
                     )
@@ -279,7 +294,7 @@ def main():
         for idx, i in enumerate(selected):
             progress.progress((idx + 1) / len(selected))
             photo = photos[i]
-            img_bytes = fetch_image_bytes(
+            img_bytes = fetch_image_bytes_cached(
                 photo["url"],
                 fallback_url=photo.get("thumb_url"),
             )
