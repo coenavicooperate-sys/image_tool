@@ -115,6 +115,18 @@ def extract_photos_via_subprocess(url: str) -> tuple[list[dict], str | None]:
         return [], str(e)
 
 
+def reset_workflow():
+    """作業をリセットして最初からやり直せるようにする"""
+    st.session_state.extracted_photos = []
+    st.session_state.selected_indices = set()
+    st.session_state.image_cache = {}
+    st.session_state.processed_images = []
+    st.session_state.processed_size_choice = ""
+    for key in list(st.session_state.keys()):
+        if key.startswith("photo_sel_"):
+            del st.session_state[key]
+
+
 def show_login_page() -> bool:
     """ログイン画面を表示。認証成功で True を返す"""
     if not AUTH_USERNAME or not AUTH_PASSWORD:
@@ -196,6 +208,11 @@ def main():
         else:
             logo_position = LOGO_POSITIONS[logo_pos_label]
 
+        st.divider()
+        if st.button("🔄 作業をリセット", key="reset_btn", help="抽出した写真・選択・加工結果をクリアして最初からやり直します"):
+            reset_workflow()
+            st.rerun()
+
         if AUTH_USERNAME and AUTH_PASSWORD and st.button("🚪 ログアウト", key="logout_btn"):
             st.session_state.authenticated = False
             st.rerun()
@@ -233,23 +250,18 @@ def main():
 
     # ========== STEP 2: 選択用チェックボックス付き一覧 ==========
     st.header("STEP 2: 写真の選択")
-    st.caption("加工する写真を選択してください（全選択/全解除も可能）")
+    st.caption("加工する写真を選択して「選択を反映」をクリックしてください（チェック中は画面が再読み込みされません）")
 
     col_select, _ = st.columns([1, 4])
     with col_select:
         if st.button("全選択"):
             st.session_state.selected_indices = set(range(len(photos)))
-            for i in range(len(photos)):
-                st.session_state[f"photo_sel_{i}"] = True
             st.rerun()
         if st.button("全解除"):
             st.session_state.selected_indices = set()
-            for i in range(len(photos)):
-                st.session_state.pop(f"photo_sel_{i}", None)
             st.rerun()
 
-    @st.fragment
-    def _photo_selection_section():
+    with st.form("photo_selection_form"):
         for row_start in range(0, len(photos), 5):
             cols = st.columns(5)
             for col_idx in range(5):
@@ -270,80 +282,87 @@ def main():
                     except Exception:
                         st.caption("読み込みエラー")
 
-                    default = i in st.session_state.selected_indices
-                    if f"photo_sel_{i}" not in st.session_state:
-                        st.session_state[f"photo_sel_{i}"] = default
-                    checked = st.checkbox(f"選択 #{i+1}", key=f"photo_sel_{i}")
-                    if checked:
-                        st.session_state.selected_indices.add(i)
-                    else:
-                        st.session_state.selected_indices.discard(i)
-
-        selected = sorted(st.session_state.selected_indices)
-        st.info(f"選択中: {len(selected)} 枚 / 全 {len(photos)} 枚")
-
-        if not selected:
-            st.warning("加工する写真を1枚以上選択してください")
-            return
-
-        st.header("STEP 3 & 4: 加工・出力")
-        if st.button("🖼️ 加工を実行"):
-            processed = []
-            progress = st.progress(0)
-            for idx, i in enumerate(selected):
-                progress.progress((idx + 1) / len(selected))
-                photo = photos[i]
-                img_bytes = fetch_image_bytes_cached(
-                    photo["url"],
-                    fallback_url=photo.get("thumb_url"),
-                )
-                if not img_bytes:
-                    continue
-                try:
-                    result = process_image(
-                        img_bytes,
-                        size_preset,
-                        logo=logo_img,
-                        logo_width_percent=logo_width_pct,
-                        logo_position=logo_position,
-                        logo_custom_x=logo_custom_x,
-                        logo_custom_y=logo_custom_y,
+                    st.checkbox(
+                        f"選択 #{i+1}",
+                        value=(i in st.session_state.selected_indices),
+                        key=f"photo_sel_{i}",
                     )
-                    webp_bytes = save_as_webp(result)
-                    processed.append((i + 1, webp_bytes))
-                except Exception:
-                    pass
-            progress.empty()
-            st.session_state.processed_images = processed
-            st.session_state.processed_size_choice = size_choice
-            st.success(f"{len(processed)} 枚を加工しました")
 
-        proc = st.session_state.processed_images
-        size_used = st.session_state.get("processed_size_choice", "")
-        if proc:
-            st.subheader("プレビュー")
-            prev_cols = st.columns(min(5, len(proc)))
-            for idx, (num, img_bytes) in enumerate(proc):
-                with prev_cols[idx % 5]:
-                    st.image(Image.open(io.BytesIO(img_bytes)), use_container_width=True)
-                    st.caption(f"#{num}")
+        submitted = st.form_submit_button("選択を反映")
+        if submitted:
+            new_selected = set()
+            for i in range(len(photos)):
+                if st.session_state.get(f"photo_sel_{i}", False):
+                    new_selected.add(i)
+            st.session_state.selected_indices = new_selected
+            st.rerun()
 
-            st.subheader("ZIPダウンロード（WebP形式・約100KB/枚）")
-            file_prefix = "TOP_tate" if "縦型" in size_used else "TOP"
-            zip_buf = io.BytesIO()
-            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                for num, img_bytes in proc:
-                    zf.writestr(f"{file_prefix}_{num}.webp", img_bytes)
-            zip_buf.seek(0)
+    selected = sorted(st.session_state.selected_indices)
+    st.info(f"選択中: {len(selected)} 枚 / 全 {len(photos)} 枚")
 
-            st.download_button(
-                "📦 全画像をZIPでダウンロード",
-                data=zip_buf,
-                file_name="processed_photos.zip",
-                mime="application/zip",
+    if not selected:
+        st.warning("加工する写真を1枚以上選択して「選択を反映」をクリックしてください")
+        return
+
+    # ========== STEP 3 & 4: 加工・プレビュー・ZIP ==========
+    st.header("STEP 3 & 4: 加工・出力")
+
+    if st.button("🖼️ 加工を実行"):
+        processed = []
+        progress = st.progress(0)
+        for idx, i in enumerate(selected):
+            progress.progress((idx + 1) / len(selected))
+            photo = photos[i]
+            img_bytes = fetch_image_bytes_cached(
+                photo["url"],
+                fallback_url=photo.get("thumb_url"),
             )
+            if not img_bytes:
+                continue
+            try:
+                result = process_image(
+                    img_bytes,
+                    size_preset,
+                    logo=logo_img,
+                    logo_width_percent=logo_width_pct,
+                    logo_position=logo_position,
+                    logo_custom_x=logo_custom_x,
+                    logo_custom_y=logo_custom_y,
+                )
+                webp_bytes = save_as_webp(result)
+                processed.append((i + 1, webp_bytes))
+            except Exception:
+                pass
+        progress.empty()
+        st.session_state.processed_images = processed
+        st.session_state.processed_size_choice = size_choice
+        st.rerun()
 
-    _photo_selection_section()
+    proc = st.session_state.processed_images
+    size_used = st.session_state.get("processed_size_choice", "")
+    if proc:
+        st.success(f"{len(proc)} 枚を加工しました")
+        st.subheader("プレビュー")
+        prev_cols = st.columns(min(5, len(proc)))
+        for idx, (num, img_bytes) in enumerate(proc):
+            with prev_cols[idx % 5]:
+                st.image(Image.open(io.BytesIO(img_bytes)), use_container_width=True)
+                st.caption(f"#{num}")
+
+        st.subheader("ZIPダウンロード（WebP形式・約100KB/枚）")
+        file_prefix = "TOP_tate" if "縦型" in size_used else "TOP"
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for num, img_bytes in proc:
+                zf.writestr(f"{file_prefix}_{num}.webp", img_bytes)
+        zip_buf.seek(0)
+
+        st.download_button(
+            "📦 全画像をZIPでダウンロード",
+            data=zip_buf,
+            file_name="processed_photos.zip",
+            mime="application/zip",
+        )
 
 
 if __name__ == "__main__":
