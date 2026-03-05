@@ -41,6 +41,16 @@ if "logo_img" not in st.session_state:
     st.session_state.logo_img = None
 if "image_cache" not in st.session_state:
     st.session_state.image_cache = {}
+if "proc_size_choice" not in st.session_state:
+    st.session_state.proc_size_choice = list(SIZE_PRESETS.keys())[0]
+if "proc_logo_width" not in st.session_state:
+    st.session_state.proc_logo_width = 25
+if "proc_logo_pos" not in st.session_state:
+    st.session_state.proc_logo_pos = "右下"
+if "proc_logo_custom_x" not in st.session_state:
+    st.session_state.proc_logo_custom_x = 85
+if "proc_logo_custom_y" not in st.session_state:
+    st.session_state.proc_logo_custom_y = 85
 
 
 def _fetch_image_bytes_inner(url: str, headers: dict) -> bytes | None:
@@ -122,9 +132,17 @@ def reset_workflow():
     st.session_state.image_cache = {}
     st.session_state.processed_images = []
     st.session_state.processed_size_choice = ""
+    st.session_state.pop("url_input", None)
     for key in list(st.session_state.keys()):
         if key.startswith("photo_sel_"):
             del st.session_state[key]
+
+
+def _pos_label_to_key(label: str) -> str:
+    """ロゴ位置ラベルをLOGO_POSITIONSのキーに変換"""
+    if label == "自分で調整":
+        return "custom"
+    return LOGO_POSITIONS.get(label, "bottom_right")
 
 
 def show_login_page() -> bool:
@@ -156,57 +174,62 @@ def main():
     st.title("📷 店舗写真 抽出・選択・一括加工")
     st.caption("ホットペッパー / 食べログのURLから写真を取得し、SNS用に加工できます")
 
-    # ========== サイドバー: 加工設定 ==========
+    # ========== サイドバー: 加工設定（フォームで一括反映・ちらつき防止） ==========
     with st.sidebar:
         st.header("⚙️ 加工設定")
+        st.caption("設定を変更したら「設定を反映」をクリック")
 
-        size_choice = st.selectbox(
-            "サイズ",
-            options=list(SIZE_PRESETS.keys()),
-            index=0,
-        )
-        size_preset = SIZE_PRESETS[size_choice]
+        with st.form("sidebar_settings_form"):
+            size_options = list(SIZE_PRESETS.keys())
+            size_index = size_options.index(st.session_state.proc_size_choice) if st.session_state.proc_size_choice in size_options else 0
+            size_choice = st.selectbox("サイズ", options=size_options, index=size_index)
 
-        st.divider()
-        logo_file = st.file_uploader(
-            "ロゴ画像（任意）",
-            type=["png", "jpg", "jpeg", "webp"],
-            help="透過PNG推奨",
-            key="logo_uploader",
-        )
-        if logo_file:
-            st.session_state.logo_img = Image.open(logo_file).convert("RGBA")
-        logo_img = st.session_state.logo_img
-        if logo_img is not None and st.button("ロゴをクリア", key="clear_logo"):
-            st.session_state.logo_img = None
+            logo_file = st.file_uploader(
+                "ロゴ画像（任意）",
+                type=["png", "jpg", "jpeg", "webp"],
+                help="透過PNG推奨",
+                key="logo_uploader",
+            )
+            clear_logo = st.session_state.logo_img is not None and st.checkbox(
+                "ロゴを削除する",
+                value=False,
+                key="clear_logo_check",
+            )
+
+            logo_width_val = st.slider(
+                "ロゴサイズ（画像横幅に対する割合）",
+                min_value=20,
+                max_value=40,
+                value=st.session_state.proc_logo_width,
+                step=1,
+                format="%d%%",
+                help="20%〜40%の範囲で指定",
+            )
+
+            pos_options = list(LOGO_POSITIONS.keys()) + ["自分で調整"]
+            pos_index = pos_options.index(st.session_state.proc_logo_pos) if st.session_state.proc_logo_pos in pos_options else 0
+            logo_pos_label = st.selectbox("ロゴ位置", options=pos_options, index=pos_index)
+
+            logo_custom_x = st.session_state.proc_logo_custom_x
+            logo_custom_y = st.session_state.proc_logo_custom_y
+            if logo_pos_label == "自分で調整":
+                st.caption("0=左/上、100=右/下")
+                logo_custom_x = st.slider("水平位置（左→右）", 0, 100, st.session_state.proc_logo_custom_x, format="%d%%")
+                logo_custom_y = st.slider("垂直位置（上→下）", 0, 100, st.session_state.proc_logo_custom_y, format="%d%%")
+
+            settings_submitted = st.form_submit_button("設定を反映")
+
+        if settings_submitted:
+            st.session_state.proc_size_choice = size_choice
+            st.session_state.proc_logo_width = logo_width_val
+            st.session_state.proc_logo_pos = logo_pos_label
+            st.session_state.proc_logo_custom_x = logo_custom_x
+            st.session_state.proc_logo_custom_y = logo_custom_y
+            if clear_logo:
+                st.session_state.logo_img = None
+            elif logo_file:
+                st.session_state.logo_img = Image.open(logo_file).convert("RGBA")
             st.rerun()
-
-        logo_width_pct = st.slider(
-            "ロゴサイズ（画像横幅に対する割合）",
-            min_value=20,
-            max_value=40,
-            value=25,
-            step=1,
-            format="%d%%",
-            help="20%〜40%の範囲で指定",
-        )
-        logo_width_pct /= 100
-
-        logo_pos_label = st.selectbox(
-            "ロゴ位置",
-            options=list(LOGO_POSITIONS.keys()) + ["自分で調整"],
-            index=0,
-        )
-
-        logo_custom_x = None
-        logo_custom_y = None
-        if logo_pos_label == "自分で調整":
-            st.caption("0=左/上、100=右/下")
-            logo_custom_x = st.slider("水平位置（左→右）", 0, 100, 85, format="%d%%")
-            logo_custom_y = st.slider("垂直位置（上→下）", 0, 100, 85, format="%d%%")
-            logo_position = "custom"
-        else:
-            logo_position = LOGO_POSITIONS[logo_pos_label]
 
         st.divider()
         if st.button("🔄 作業をリセット", key="reset_btn", help="抽出した写真・選択・加工結果をクリアして最初からやり直します"):
@@ -217,18 +240,29 @@ def main():
             st.session_state.authenticated = False
             st.rerun()
 
-    # ========== STEP 1: 写真抽出 ==========
-    st.header("STEP 1: 写真の抽出")
-    url_input = st.text_input(
-        "ホットペッパー または 食べログのURL",
-        placeholder="https://tabelog.com/... または https://...hotpepper.jp/...",
-        key="url_input",
-    )
+    size_preset = SIZE_PRESETS[st.session_state.proc_size_choice]
+    logo_img = st.session_state.logo_img
+    logo_width_pct = st.session_state.proc_logo_width / 100
+    logo_position = _pos_label_to_key(st.session_state.proc_logo_pos)
+    logo_custom_x = st.session_state.proc_logo_custom_x if logo_position == "custom" else None
+    logo_custom_y = st.session_state.proc_logo_custom_y if logo_position == "custom" else None
 
-    if st.button("🔍 写真を抽出", type="primary"):
+    # ========== STEP 1: 写真抽出（フォームで一括・ちらつき防止） ==========
+    st.header("STEP 1: 写真の抽出")
+    with st.form("extract_form"):
+        url_input = st.text_input(
+            "ホットペッパー または 食べログのURL",
+            placeholder="https://tabelog.com/... または https://...hotpepper.jp/...",
+            value=st.session_state.get("url_input", ""),
+            key="extract_url_input",
+        )
+        extract_submitted = st.form_submit_button("🔍 写真を抽出")
+
+    if extract_submitted:
         if not url_input or not url_input.strip():
             st.error("URLを入力してください")
         else:
+            st.session_state.url_input = url_input.strip()
             with st.spinner("写真を取得中…（数十秒かかる場合があります）"):
                 photos, err = extract_photos_via_subprocess(url_input.strip())
                 if err:
@@ -242,6 +276,7 @@ def main():
                     st.session_state.selected_indices = set()
                     st.session_state.image_cache = {}
                     st.success(f"{len(photos)} 枚の写真を取得しました")
+            st.rerun()
 
     photos = st.session_state.extracted_photos
     if not photos:
