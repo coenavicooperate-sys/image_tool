@@ -248,101 +248,102 @@ def main():
                 st.session_state.pop(f"photo_sel_{i}", None)
             st.rerun()
 
-    # グリッド表示（サムネイル + チェックボックス）
-    for row_start in range(0, len(photos), 5):
-        cols = st.columns(5)
-        for col_idx in range(5):
-            i = row_start + col_idx
-            if i >= len(photos):
-                break
-            with cols[col_idx]:
-                try:
-                    img_data = fetch_image_bytes_cached(
-                        photos[i]["url"],
-                        fallback_url=photos[i].get("thumb_url"),
-                    )
-                    if img_data:
-                        img = Image.open(io.BytesIO(img_data))
-                        st.image(img, use_container_width=True)
-                    else:
+    @st.fragment
+    def _photo_selection_section():
+        for row_start in range(0, len(photos), 5):
+            cols = st.columns(5)
+            for col_idx in range(5):
+                i = row_start + col_idx
+                if i >= len(photos):
+                    break
+                with cols[col_idx]:
+                    try:
+                        img_data = fetch_image_bytes_cached(
+                            photos[i]["url"],
+                            fallback_url=photos[i].get("thumb_url"),
+                        )
+                        if img_data:
+                            img = Image.open(io.BytesIO(img_data))
+                            st.image(img, use_container_width=True)
+                        else:
+                            st.caption("読み込みエラー")
+                    except Exception:
                         st.caption("読み込みエラー")
-                except Exception:
-                    st.caption("読み込みエラー")
 
-                default = i in st.session_state.selected_indices
-                if f"photo_sel_{i}" not in st.session_state:
-                    st.session_state[f"photo_sel_{i}"] = default
-                checked = st.checkbox(f"選択 #{i+1}", key=f"photo_sel_{i}")
-                if checked:
-                    st.session_state.selected_indices.add(i)
-                else:
-                    st.session_state.selected_indices.discard(i)
+                    default = i in st.session_state.selected_indices
+                    if f"photo_sel_{i}" not in st.session_state:
+                        st.session_state[f"photo_sel_{i}"] = default
+                    checked = st.checkbox(f"選択 #{i+1}", key=f"photo_sel_{i}")
+                    if checked:
+                        st.session_state.selected_indices.add(i)
+                    else:
+                        st.session_state.selected_indices.discard(i)
 
-    selected = sorted(st.session_state.selected_indices)
-    st.info(f"選択中: {len(selected)} 枚 / 全 {len(photos)} 枚")
+        selected = sorted(st.session_state.selected_indices)
+        st.info(f"選択中: {len(selected)} 枚 / 全 {len(photos)} 枚")
 
-    if not selected:
-        st.warning("加工する写真を1枚以上選択してください")
-        return
+        if not selected:
+            st.warning("加工する写真を1枚以上選択してください")
+            return
 
-    # ========== STEP 3 & 4: 加工・プレビュー・ZIP ==========
-    st.header("STEP 3 & 4: 加工・出力")
-
-    if st.button("🖼️ 加工を実行"):
-        processed = []
-        progress = st.progress(0)
-        for idx, i in enumerate(selected):
-            progress.progress((idx + 1) / len(selected))
-            photo = photos[i]
-            img_bytes = fetch_image_bytes_cached(
-                photo["url"],
-                fallback_url=photo.get("thumb_url"),
-            )
-            if not img_bytes:
-                continue
-            try:
-                result = process_image(
-                    img_bytes,
-                    size_preset,
-                    logo=logo_img,
-                    logo_width_percent=logo_width_pct,
-                    logo_position=logo_position,
-                    logo_custom_x=logo_custom_x,
-                    logo_custom_y=logo_custom_y,
+        st.header("STEP 3 & 4: 加工・出力")
+        if st.button("🖼️ 加工を実行"):
+            processed = []
+            progress = st.progress(0)
+            for idx, i in enumerate(selected):
+                progress.progress((idx + 1) / len(selected))
+                photo = photos[i]
+                img_bytes = fetch_image_bytes_cached(
+                    photo["url"],
+                    fallback_url=photo.get("thumb_url"),
                 )
-                webp_bytes = save_as_webp(result)
-                processed.append((i + 1, webp_bytes))
-            except Exception:
-                pass
-        progress.empty()
-        st.session_state.processed_images = processed
-        st.session_state.processed_size_choice = size_choice
-        st.success(f"{len(processed)} 枚を加工しました")
+                if not img_bytes:
+                    continue
+                try:
+                    result = process_image(
+                        img_bytes,
+                        size_preset,
+                        logo=logo_img,
+                        logo_width_percent=logo_width_pct,
+                        logo_position=logo_position,
+                        logo_custom_x=logo_custom_x,
+                        logo_custom_y=logo_custom_y,
+                    )
+                    webp_bytes = save_as_webp(result)
+                    processed.append((i + 1, webp_bytes))
+                except Exception:
+                    pass
+            progress.empty()
+            st.session_state.processed_images = processed
+            st.session_state.processed_size_choice = size_choice
+            st.success(f"{len(processed)} 枚を加工しました")
 
-    proc = st.session_state.processed_images
-    size_used = st.session_state.get("processed_size_choice", "")
-    if proc:
-        st.subheader("プレビュー")
-        prev_cols = st.columns(min(5, len(proc)))
-        for idx, (num, img_bytes) in enumerate(proc):
-            with prev_cols[idx % 5]:
-                st.image(Image.open(io.BytesIO(img_bytes)), use_container_width=True)
-                st.caption(f"#{num}")
+        proc = st.session_state.processed_images
+        size_used = st.session_state.get("processed_size_choice", "")
+        if proc:
+            st.subheader("プレビュー")
+            prev_cols = st.columns(min(5, len(proc)))
+            for idx, (num, img_bytes) in enumerate(proc):
+                with prev_cols[idx % 5]:
+                    st.image(Image.open(io.BytesIO(img_bytes)), use_container_width=True)
+                    st.caption(f"#{num}")
 
-        st.subheader("ZIPダウンロード（WebP形式・約100KB/枚）")
-        file_prefix = "TOP_tate" if "縦型" in size_used else "TOP"
-        zip_buf = io.BytesIO()
-        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for num, img_bytes in proc:
-                zf.writestr(f"{file_prefix}_{num}.webp", img_bytes)
-        zip_buf.seek(0)
+            st.subheader("ZIPダウンロード（WebP形式・約100KB/枚）")
+            file_prefix = "TOP_tate" if "縦型" in size_used else "TOP"
+            zip_buf = io.BytesIO()
+            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for num, img_bytes in proc:
+                    zf.writestr(f"{file_prefix}_{num}.webp", img_bytes)
+            zip_buf.seek(0)
 
-        st.download_button(
-            "📦 全画像をZIPでダウンロード",
-            data=zip_buf,
-            file_name="processed_photos.zip",
-            mime="application/zip",
-        )
+            st.download_button(
+                "📦 全画像をZIPでダウンロード",
+                data=zip_buf,
+                file_name="processed_photos.zip",
+                mime="application/zip",
+            )
+
+    _photo_selection_section()
 
 
 if __name__ == "__main__":
