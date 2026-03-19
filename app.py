@@ -179,17 +179,24 @@ def main():
         st.header("⚙️ 加工設定")
         st.caption("設定を変更したら「設定を反映」をクリック")
 
+        logo_file = st.file_uploader(
+            "ロゴ画像（任意）",
+            type=["png", "jpg", "jpeg", "webp"],
+            help="透過PNG推奨",
+            key="logo_uploader",
+        )
+        if logo_file:
+            st.session_state.logo_img = Image.open(logo_file).convert("RGBA")
+        if st.session_state.logo_img is not None and st.button("ロゴをクリア", key="clear_logo"):
+            st.session_state.logo_img = None
+            st.rerun()
+
+        st.divider()
         with st.form("sidebar_settings_form"):
             size_options = list(SIZE_PRESETS.keys())
             size_index = size_options.index(st.session_state.proc_size_choice) if st.session_state.proc_size_choice in size_options else 0
             size_choice = st.selectbox("サイズ", options=size_options, index=size_index)
 
-            logo_file = st.file_uploader(
-                "ロゴ画像（任意）",
-                type=["png", "jpg", "jpeg", "webp"],
-                help="透過PNG推奨",
-                key="logo_uploader",
-            )
             clear_logo = st.session_state.logo_img is not None and st.checkbox(
                 "ロゴを削除する",
                 value=False,
@@ -227,8 +234,6 @@ def main():
             st.session_state.proc_logo_custom_y = logo_custom_y
             if clear_logo:
                 st.session_state.logo_img = None
-            elif logo_file:
-                st.session_state.logo_img = Image.open(logo_file).convert("RGBA")
             st.rerun()
 
         st.divider()
@@ -259,12 +264,13 @@ def main():
         extract_submitted = st.form_submit_button("🔍 写真を抽出")
 
     if extract_submitted:
-        if not url_input or not url_input.strip():
+        url_to_use = (url_input or st.session_state.get("extract_url_input", "") or "").strip()
+        if not url_to_use:
             st.error("URLを入力してください")
         else:
-            st.session_state.url_input = url_input.strip()
+            st.session_state.url_input = url_to_use
             with st.spinner("写真を取得中…（数十秒かかる場合があります）"):
-                photos, err = extract_photos_via_subprocess(url_input.strip())
+                photos, err = extract_photos_via_subprocess(url_to_use)
                 if err:
                     st.error(f"**抽出に失敗しました:** {err}")
                     st.info(
