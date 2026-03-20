@@ -72,6 +72,7 @@ def fetch_image_bytes(url: str, fallback_url: str | None = None) -> bytes | None
     }
     if "tblg.k-img.com" in url or "imgfp.hotp" in url:
         headers["Referer"] = "https://tabelog.com/"
+        headers["Origin"] = "https://tabelog.com"
     elif "hotpepper" in url:
         headers["Referer"] = "https://www.hotpepper.jp/"
 
@@ -106,7 +107,7 @@ def extract_photos_via_subprocess(url: str) -> tuple[list[dict], str | None]:
             [sys.executable, str(cli_path), url],
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=180,
             cwd=str(Path(__file__).parent),
         )
         if result.returncode != 0:

@@ -14,7 +14,9 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 HIGH_RES_PATTERNS = [
     # 食べログ tblg.k-img.com: 小サイズ → 1024x1024 で高画質取得
     (re.compile(r'320x320_rect_', re.I), r'1024x1024_rect_'),
+    (re.compile(r'320x320_square_', re.I), r'1024x1024_rect_'),
     (re.compile(r'640x640_rect_', re.I), r'1024x1024_rect_'),
+    (re.compile(r'640x640_square_', re.I), r'1024x1024_rect_'),
     (re.compile(r'480x480_rect_', re.I), r'1024x1024_rect_'),
     # 食べログ: _s.jpg → _l.jpg, _m.jpg → _l.jpg など
     (re.compile(r'_s(\d*)\.(jpg|jpeg|png|webp)', re.I), r'_l\1.\2'),
@@ -120,6 +122,34 @@ def _add_image_url(results: list, seen_urls: set, url: str, base_url: str) -> No
     results.append({"url": full_url, "thumb_url": url})
 
 
+def _extract_from_page(page, base_url: str, seen_urls: set, results: list) -> None:
+    """ページから画像URLを抽出（共通処理）"""
+    for img in page.query_selector_all('img[src]'):
+        src = img.get_attribute("src")
+        _add_image_url(results, seen_urls, src or "", base_url)
+    for img in page.query_selector_all('img[data-src], img[data-lazy-src]'):
+        src = img.get_attribute("data-src") or img.get_attribute("data-lazy-src")
+        _add_image_url(results, seen_urls, src or "", base_url)
+    for a in page.query_selector_all('a[href*="tblg.k-img.com"], a[href*=".jpg"], a[href*=".jpeg"], a[href*=".png"]'):
+        href = a.get_attribute("href")
+        _add_image_url(results, seen_urls, href or "", base_url)
+    if len(results) < 5:
+        urls = page.evaluate("""
+            () => {
+                const urls = new Set();
+                document.querySelectorAll('img[src], a[href]').forEach(el => {
+                    const u = el.getAttribute('src') || el.getAttribute('href') || '';
+                    if (u.match(/\\.(jpg|jpeg|png|webp)/i) && (u.includes('tblg.k-img.com') || u.includes('imgfp.hotp'))) {
+                        urls.add(u);
+                    }
+                });
+                return Array.from(urls);
+            }
+        """)
+        for u in urls or []:
+            _add_image_url(results, seen_urls, u, base_url)
+
+
 def extract_photos_from_url(input_url: str, headless: bool = True) -> list[dict]:
     """
     指定URLから写真を抽出
@@ -142,8 +172,8 @@ def extract_photos_from_url(input_url: str, headless: bool = True) -> list[dict]
         page = context.new_page()
 
         try:
-            page.goto(photo_page, wait_until="load", timeout=60000)
-            time.sleep(4)
+            page.goto(photo_page, wait_until="load", timeout=90000)
+            time.sleep(5)
 
             # スクロールして遅延読み込み画像を表示
             last_height = 0
@@ -163,38 +193,17 @@ def extract_photos_from_url(input_url: str, headless: bool = True) -> list[dict]
                 last_height = new_height
 
             base_url = page.url
+            _extract_from_page(page, base_url, seen_urls, results)
 
-            # 1. img[src] から抽出
-            for img in page.query_selector_all('img[src]'):
-                src = img.get_attribute("src")
-                _add_image_url(results, seen_urls, src or "", base_url)
-
-            # 2. data-src など遅延読み込み用
-            for img in page.query_selector_all('img[data-src], img[data-lazy-src]'):
-                src = img.get_attribute("data-src") or img.get_attribute("data-lazy-src")
-                _add_image_url(results, seen_urls, src or "", base_url)
-
-            # 3. 食べログ: a[href] 内の tblg.k-img.com 画像URL（リンク先が画像の場合）
-            for a in page.query_selector_all('a[href*="tblg.k-img.com"], a[href*=".jpg"], a[href*=".jpeg"], a[href*=".png"]'):
-                href = a.get_attribute("href")
-                _add_image_url(results, seen_urls, href or "", base_url)
-
-            # 4. JavaScriptでページ内の画像URLを一括取得（フォールバック）
-            if len(results) < 5:
-                urls = page.evaluate("""
-                    () => {
-                        const urls = new Set();
-                        document.querySelectorAll('img[src], a[href]').forEach(el => {
-                            const u = el.getAttribute('src') || el.getAttribute('href') || '';
-                            if (u.match(/\\.(jpg|jpeg|png|webp)/i) && (u.includes('tblg.k-img.com') || u.includes('imgfp.hotp'))) {
-                                urls.add(u);
-                            }
-                        });
-                        return Array.from(urls);
-                    }
-                """)
-                for u in urls or []:
-                    _add_image_url(results, seen_urls, u, base_url)
+            # 食べログ: PC版で0件なら smp2（元URL）を再試行
+            if len(results) < 3 and 'tabelog.com' in input_url and '/smp2' in input_url:
+                page.goto(input_url, wait_until="load", timeout=60000)
+                time.sleep(4)
+                for _ in range(5):
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    time.sleep(1)
+                base_url = page.url
+                _extract_from_page(page, base_url, seen_urls, results)
 
         except PlaywrightTimeout:
             pass
