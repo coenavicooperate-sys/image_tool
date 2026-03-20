@@ -74,6 +74,10 @@ def get_photo_page_url(url: str) -> str | None:
     url_lower = url.lower()
 
     if is_photo_page(url):
+        # 食べログ smp2（スマホ版）→ PC版に変換（画像抽出が安定しやすい）
+        if 'tabelog.com' in parsed.netloc and '/smp2' in path:
+            path = path.replace('/smp2', '').rstrip('/')
+            return f"{parsed.scheme}://{parsed.netloc}{path}/"
         return url
 
     # 食べログ: 店舗ページ → dtlphotolst に変換
@@ -138,8 +142,8 @@ def extract_photos_from_url(input_url: str, headless: bool = True) -> list[dict]
         page = context.new_page()
 
         try:
-            page.goto(photo_page, wait_until="domcontentloaded", timeout=60000)
-            time.sleep(3)
+            page.goto(photo_page, wait_until="load", timeout=60000)
+            time.sleep(4)
 
             # スクロールして遅延読み込み画像を表示
             last_height = 0
