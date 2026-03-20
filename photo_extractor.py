@@ -82,6 +82,22 @@ def get_photo_page_url(url: str) -> str | None:
             return f"{parsed.scheme}://{parsed.netloc}{path}/"
         return url
 
+
+def get_fallback_photo_url(url: str) -> str | None:
+    """
+    カテゴリ付きURL（例: dtlphotolst/1/smp2/）で失敗した場合の代替URLを返す
+    「全写真」ページの方が安定することがある
+    """
+    if 'tabelog.com' not in url or 'dtlphotolst' not in url:
+        return None
+    parsed = urlparse(url)
+    path = parsed.path.rstrip('/')
+    # dtlphotolst/1/ や dtlphotolst/2/ など → dtlphotolst/ に変換
+    if re.search(r'/dtlphotolst/\d+/', path):
+        base = path.split('/dtlphotolst')[0]
+        return f"{parsed.scheme}://{parsed.netloc}{base}/dtlphotolst/"
+    return None
+
     # 食べログ: 店舗ページ → dtlphotolst に変換
     if 'tabelog.com' in parsed.netloc:
         # 例: /tokyo/A1303/A130302/13215961/ → /tokyo/A1303/A130302/13215961/dtlphotolst/
@@ -195,15 +211,33 @@ def extract_photos_from_url(input_url: str, headless: bool = True) -> list[dict]
             base_url = page.url
             _extract_from_page(page, base_url, seen_urls, results)
 
-            # 食べログ: PC版で0件なら smp2（元URL）を再試行
-            if len(results) < 3 and 'tabelog.com' in input_url and '/smp2' in input_url:
-                page.goto(input_url, wait_until="load", timeout=60000)
-                time.sleep(4)
-                for _ in range(5):
-                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    time.sleep(1)
-                base_url = page.url
-                _extract_from_page(page, base_url, seen_urls, results)
+            # 食べログ: 少ない場合のフォールバック
+            if len(results) < 3 and 'tabelog.com' in input_url:
+                # 1) カテゴリ付きURL（/1/など）→ 全写真ページを試行
+                fallback = get_fallback_photo_url(input_url)
+                if fallback and fallback != photo_page:
+                    try:
+                        page.goto(fallback, wait_until="load", timeout=60000)
+                        time.sleep(4)
+                        for _ in range(8):
+                            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                            time.sleep(1)
+                        base_url = page.url
+                        _extract_from_page(page, base_url, seen_urls, results)
+                    except Exception:
+                        pass
+                # 2) まだ少なければ smp2（元URL）を試行
+                if len(results) < 3 and '/smp2' in input_url:
+                    try:
+                        page.goto(input_url, wait_until="load", timeout=60000)
+                        time.sleep(4)
+                        for _ in range(5):
+                            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                            time.sleep(1)
+                        base_url = page.url
+                        _extract_from_page(page, base_url, seen_urls, results)
+                    except Exception:
+                        pass
 
         except PlaywrightTimeout:
             pass

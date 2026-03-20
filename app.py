@@ -258,9 +258,10 @@ def main():
     with st.form("extract_form"):
         url_input = st.text_input(
             "ホットペッパー または 食べログのURL",
-            placeholder="https://tabelog.com/... または https://...hotpepper.jp/...",
+            placeholder="https://tabelog.com/.../dtlphotolst/ または https://...hotpepper.jp/.../photo/",
             value=st.session_state.get("url_input", ""),
             key="extract_url_input",
+            help="食べログ: 写真一覧ページのURL（dtlphotolst を含む）。カテゴリ付き(/1/smp2/)で失敗する場合は全写真ページ(.../dtlphotolst/)を試してください。",
         )
         extract_submitted = st.form_submit_button("🔍 写真を抽出")
 
@@ -276,6 +277,10 @@ def main():
                     st.error(f"**抽出に失敗しました:** {err}")
                     st.info(
                         "**対処法:** ターミナルで `playwright install chromium` を実行してブラウザをインストールしてください。"
+                    )
+                    st.info(
+                        "**食べログで失敗する場合:** カテゴリ付きURL（`/dtlphotolst/1/smp2/`）の代わりに、"
+                        "全写真ページ `.../dtlphotolst/smp2/` または `.../dtlphotolst/` を試してください。"
                     )
                     st.session_state.extracted_photos = []
                 else:
