@@ -189,12 +189,16 @@ def main():
         logo_file = st.file_uploader(
             "ロゴ画像（任意）",
             type=["png", "jpg", "jpeg", "webp"],
-            help="透過PNG推奨",
+            help="透過PNG推奨。再読み込み後も保持するようバイト列で保存します。",
             key="logo_uploader",
         )
-        if logo_file:
-            st.session_state.logo_img = Image.open(logo_file).convert("RGBA")
-        if st.session_state.logo_img is not None and st.button("ロゴをクリア", key="clear_logo"):
+        if logo_file is not None:
+            logo_file.seek(0)
+            raw = logo_file.read()
+            if raw:
+                st.session_state.logo_bytes = raw
+        if st.button("ロゴをクリア", key="clear_logo", disabled=not st.session_state.get("logo_bytes")):
+            st.session_state.pop("logo_bytes", None)
             st.session_state.logo_img = None
             st.rerun()
 
@@ -204,7 +208,7 @@ def main():
             size_index = size_options.index(st.session_state.proc_size_choice) if st.session_state.proc_size_choice in size_options else 0
             size_choice = st.selectbox("サイズ", options=size_options, index=size_index)
 
-            clear_logo = st.session_state.logo_img is not None and st.checkbox(
+            clear_logo = bool(st.session_state.get("logo_bytes")) and st.checkbox(
                 "ロゴを削除する",
                 value=False,
                 key="clear_logo_check",
@@ -240,6 +244,7 @@ def main():
             st.session_state.proc_logo_custom_x = logo_custom_x
             st.session_state.proc_logo_custom_y = logo_custom_y
             if clear_logo:
+                st.session_state.pop("logo_bytes", None)
                 st.session_state.logo_img = None
             st.rerun()
 
@@ -253,7 +258,17 @@ def main():
             st.rerun()
 
     size_preset = SIZE_PRESETS[st.session_state.proc_size_choice]
-    logo_img = st.session_state.logo_img
+    if st.session_state.get("logo_bytes"):
+        try:
+            logo_img = Image.open(io.BytesIO(st.session_state["logo_bytes"])).convert("RGBA")
+            st.session_state.logo_img = logo_img
+        except Exception:
+            st.session_state.pop("logo_bytes", None)
+            logo_img = None
+            st.session_state.logo_img = None
+    else:
+        logo_img = None
+        st.session_state.logo_img = None
     logo_width_pct = st.session_state.proc_logo_width / 100
     logo_position = _pos_label_to_key(st.session_state.proc_logo_pos)
     logo_custom_x = st.session_state.proc_logo_custom_x if logo_position == "custom" else None
