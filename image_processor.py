@@ -14,7 +14,17 @@ SIZE_PRESETS = {
 }
 
 # WebP出力の目標ファイルサイズ（バイト）
-WEBP_TARGET_BYTES = 100_000
+WEBP_TARGET_BYTES_PORTRAIT = 100_000   # 縦型（スマホ向け）
+WEBP_TARGET_BYTES_LANDSCAPE = 200_000  # 横型（PC向け・画質優先）
+
+# 後方互換用（デフォルトは縦型相当）
+WEBP_TARGET_BYTES = WEBP_TARGET_BYTES_PORTRAIT
+
+
+def webp_target_bytes_for_preset(size_preset: tuple[int, int]) -> int:
+    """幅が高さより大きい場合は横型として目標を上げる"""
+    w, h = size_preset
+    return WEBP_TARGET_BYTES_LANDSCAPE if w > h else WEBP_TARGET_BYTES_PORTRAIT
 
 # 縦型画像（スマホ表示向け）の補正
 MOBILE_BRIGHTNESS = 1.10   # 明るさ +10%
@@ -48,12 +58,12 @@ def enhance_for_mobile(img: Image.Image) -> Image.Image:
     return img
 
 
-def save_as_webp(img: Image.Image, target_bytes: int = WEBP_TARGET_BYTES) -> bytes:
+def save_as_webp(img: Image.Image, target_bytes: int = WEBP_TARGET_BYTES_PORTRAIT) -> bytes:
     """
-    WebP形式で保存し、目標ファイルサイズ（約100KB）になるよう品質を調整
+    WebP形式で保存し、target_bytes 前後になるよう品質を調整（縦型約100KB・横型約200KBなど）
     """
     img = img.convert("RGB")
-    quality = 82
+    quality = 88 if target_bytes >= 150_000 else 82
     for _ in range(15):
         buf = io.BytesIO()
         img.save(buf, "WEBP", quality=quality, method=6)

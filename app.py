@@ -16,7 +16,13 @@ import streamlit as st
 from PIL import Image
 
 from dotenv import load_dotenv
-from image_processor import LOGO_POSITIONS, SIZE_PRESETS, process_image, save_as_webp
+from image_processor import (
+    LOGO_POSITIONS,
+    SIZE_PRESETS,
+    process_image,
+    save_as_webp,
+    webp_target_bytes_for_preset,
+)
 
 load_dotenv()
 
@@ -376,7 +382,9 @@ def main():
                     logo_custom_x=logo_custom_x,
                     logo_custom_y=logo_custom_y,
                 )
-                webp_bytes = save_as_webp(result)
+                webp_bytes = save_as_webp(
+                    result, target_bytes=webp_target_bytes_for_preset(size_preset)
+                )
                 processed.append((i + 1, webp_bytes))
             except Exception:
                 pass
@@ -396,7 +404,7 @@ def main():
                 st.image(Image.open(io.BytesIO(img_bytes)), use_container_width=True)
                 st.caption(f"#{num}")
 
-        st.subheader("ZIPダウンロード（WebP形式・約100KB/枚）")
+        st.subheader("ZIPダウンロード（WebP形式・縦型約100KB/枚・横型約200KB/枚）")
         file_prefix = "TOP_tate" if "縦型" in size_used else "TOP"
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
