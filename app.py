@@ -459,27 +459,40 @@ def main():
 
     st.subheader("ZIPダウンロード（WebP形式・縦型約100KB/枚・横型約200KB/枚）")
     file_prefix = "TOP_tate" if proc and "縦型" in size_used else "TOP"
+    # 同一 key の download_button を1つだけ描画（if/else で別ウィジェットにすると
+    # 有効化後に Streamlit が部品を食い違わせ、ボタンが出ないことがある）
+    zip_download_bytes = EMPTY_ZIP_BYTES
+    zip_build_error: str | None = None
     if proc:
-        zip_buf = io.BytesIO()
-        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for num, img_bytes in proc:
-                zf.writestr(f"{file_prefix}_{num}.webp", img_bytes)
-        zip_buf.seek(0)
-        st.download_button(
-            "📦 全画像をZIPでダウンロード",
-            data=zip_buf,
-            file_name="processed_photos.zip",
-            mime="application/zip",
-        )
-    else:
-        st.download_button(
-            "📦 全画像をZIPでダウンロード",
-            data=EMPTY_ZIP_BYTES,
-            file_name="processed_photos.zip",
-            mime="application/zip",
-            disabled=True,
-            help="先に「加工を実行」を完了させるとダウンロードできます。",
-        )
+        try:
+            zip_buf = io.BytesIO()
+            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for num, img_bytes in proc:
+                    zf.writestr(f"{file_prefix}_{num}.webp", img_bytes)
+            zip_download_bytes = zip_buf.getvalue()
+        except Exception as e:
+            zip_build_error = str(e)
+
+    if zip_build_error:
+        st.error(f"ZIPの作成に失敗しました: {zip_build_error}")
+
+    dl_label = "📦 全画像をZIPでダウンロード"
+    dl_disabled = (not proc) or (zip_build_error is not None)
+    dl_kwargs: dict = {
+        "label": dl_label,
+        "data": zip_download_bytes,
+        "file_name": "processed_photos.zip",
+        "mime": "application/zip",
+        "disabled": dl_disabled,
+        "key": "zip_download_main",
+        "use_container_width": True,
+    }
+    if dl_disabled:
+        dl_kwargs["help"] = "先に「加工を実行」を完了するか、上記エラーを解消してください。"
+    st.download_button(**dl_kwargs)
+
+    if proc and not zip_build_error:
+        st.caption(f"ZIP内: {len(proc)} 枚の WebP（ファイル名 `{file_prefix}_*.webp`）")
 
 
 if __name__ == "__main__":
