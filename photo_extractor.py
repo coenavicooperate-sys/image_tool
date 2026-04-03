@@ -12,6 +12,9 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 
 # サムネイルURLを高画質URLに変換するパターン
 HIGH_RES_PATTERNS = [
+    # 食べログ tblg.k-img.com: 一覧の 150px サムネ → 1024（クリック後に近い大きさ）
+    (re.compile(r'150x150_rect_', re.I), r'1024x1024_rect_'),
+    (re.compile(r'150x150_square_', re.I), r'1024x1024_rect_'),
     # 食べログ tblg.k-img.com: 小サイズ → 1024x1024 で高画質取得
     (re.compile(r'320x320_rect_', re.I), r'1024x1024_rect_'),
     (re.compile(r'320x320_square_', re.I), r'1024x1024_rect_'),
@@ -29,6 +32,32 @@ HIGH_RES_PATTERNS = [
 ]
 
 
+def _tabelog_boost_wxh_in_url(url: str) -> str:
+    """
+    食べログ CDN の任意 WxH_rect_ / WxH_square_（横長・縦長の非正方形サムネ含む）を
+    長辺 1024px・縦横比維持の rect に拡大。正方形のみの置換パターンに無いサイズを拾う。
+    """
+    if 'tblg.k-img.com' not in url.lower():
+        return url
+
+    def repl(m: re.Match) -> str:
+        try:
+            w, h = int(m.group(1)), int(m.group(2))
+        except ValueError:
+            return m.group(0)
+        if w <= 0 or h <= 0:
+            return m.group(0)
+        if max(w, h) >= 1024:
+            return m.group(0)
+        if w >= h:
+            nw, nh = 1024, max(1, round(1024 * h / w))
+        else:
+            nh, nw = 1024, max(1, round(1024 * w / h))
+        return f"{nw}x{nh}_rect_"
+
+    return re.sub(r'(\d+)x(\d+)_(rect|square)_', repl, url, flags=re.I)
+
+
 def to_high_res_url(url: str) -> str:
     """サムネイルURLを高画質版URLに変換"""
     if not url or not url.startswith(('http://', 'https://')):
@@ -36,6 +65,7 @@ def to_high_res_url(url: str) -> str:
     result = url
     for pattern, replacement in HIGH_RES_PATTERNS:
         result = pattern.sub(replacement, result)
+    result = _tabelog_boost_wxh_in_url(result)
     # 重複した ?& を整理
     result = re.sub(r'\?&+', '?', result).rstrip('?&')
     return result
@@ -126,12 +156,14 @@ def _add_image_url(results: list, seen_urls: set, url: str, base_url: str) -> No
         return
     if 'imgvc.com' in url.lower():  # トラッキング用画像
         return
-    # 150x150 はユーザーアバター、料理写真は 320x320 以上
-    if '150x150' in url or '100x100' in url:
-        return
     if not any(x in url.lower() for x in ['.jpg', '.jpeg', '.png', '.webp']):
         return
     full_url = normalize_image_url(url, base_url)
+    # 極小は除外。食べログの 150px は to_high_res で 1024 に昇格する前にここへ来ないよう、変換後に判定
+    if '100x100' in full_url:
+        return
+    if '150x150' in full_url and 'tblg.k-img.com' not in full_url.lower():
+        return
     if full_url in seen_urls:
         return
     seen_urls.add(full_url)
