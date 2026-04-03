@@ -26,6 +26,17 @@ from image_processor import (
 
 load_dotenv()
 
+# 未加工時も download_button を表示するための空ZIP（disabled 時の data 用）
+def _empty_zip_bytes() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        pass
+    buf.seek(0)
+    return buf.getvalue()
+
+
+EMPTY_ZIP_BYTES = _empty_zip_bytes()
+
 st.set_page_config(page_title="店舗写真加工ツール", page_icon="📷", layout="wide")
 
 # 認証用（環境変数 IMAGE_TOOL_USERNAME, IMAGE_TOOL_PASSWORD で設定）
@@ -292,23 +303,32 @@ def main():
             st.error("URLを入力してください")
         else:
             st.session_state.url_input = url_to_use
-            with st.spinner("写真を取得中…（数十秒かかる場合があります）"):
+            with st.status("写真を取得しています…", expanded=True) as status:
+                status.write(
+                    "Playwright でページを開き、画像URLを収集しています。"
+                    " **1〜3分かかることがあります。** このブラウザタブは閉じずにお待ちください。"
+                )
                 photos, err = extract_photos_via_subprocess(url_to_use)
                 if err:
-                    st.error(f"**抽出に失敗しました:** {err}")
-                    st.info(
-                        "**対処法:** ターミナルで `playwright install chromium` を実行してブラウザをインストールしてください。"
-                    )
-                    st.info(
-                        "**食べログで失敗する場合:** カテゴリ付きURL（`/dtlphotolst/1/smp2/`）の代わりに、"
-                        "全写真ページ `.../dtlphotolst/smp2/` または `.../dtlphotolst/` を試してください。"
-                    )
-                    st.session_state.extracted_photos = []
+                    status.update(label="抽出に失敗しました", state="error")
+                    status.write(str(err))
                 else:
-                    st.session_state.extracted_photos = photos
-                    st.session_state.selected_indices = set()
-                    st.session_state.image_cache = {}
-                    st.success(f"{len(photos)} 枚の写真を取得しました")
+                    status.update(label=f"取得完了（{len(photos)} 枚）", state="complete")
+
+            if err:
+                st.error(f"**抽出に失敗しました:** {err}")
+                st.info(
+                    "**対処法:** ターミナルで `playwright install chromium` を実行してブラウザをインストールしてください。"
+                )
+                st.info(
+                    "**食べログで失敗する場合:** カテゴリ付きURL（`/dtlphotolst/1/smp2/`）の代わりに、"
+                    "全写真ページ `.../dtlphotolst/smp2/` または `.../dtlphotolst/` を試してください。"
+                )
+                st.session_state.extracted_photos = []
+            else:
+                st.session_state.extracted_photos = photos
+                st.session_state.selected_indices = set()
+                st.session_state.image_cache = {}
             st.rerun()
 
     photos = st.session_state.extracted_photos
@@ -318,7 +338,10 @@ def main():
 
     # ========== STEP 2: 選択用チェックボックス付き一覧 ==========
     st.header("STEP 2: 写真の選択")
-    st.caption("加工する写真を選択して「選択を反映」をクリックしてください（チェック中は画面が再読み込みされません）")
+    st.caption(
+        "加工する写真を選択して「選択を反映」をクリックしてください（チェック中は画面が再読み込みされません）。"
+        " 枚数が多いとサムネイル読み込みに時間がかかり、止まったように見える場合があります。"
+    )
 
     col_select, _ = st.columns([1, 4])
     with col_select:
@@ -374,12 +397,20 @@ def main():
 
     # ========== STEP 3 & 4: 加工・プレビュー・ZIP ==========
     st.header("STEP 3 & 4: 加工・出力")
+    st.caption(
+        "「**加工を実行**」で一括処理します。選択枚数が多いほど時間がかかります。"
+        " 下の進捗バーとメッセージで処理中であることを確認できます。"
+    )
 
-    if st.button("🖼️ 加工を実行"):
+    if st.button("🖼️ 加工を実行", type="primary"):
         processed = []
-        progress = st.progress(0)
+        n_sel = len(selected)
+        progress = st.progress(0, text=f"準備中…（全 {n_sel} 枚）")
         for idx, i in enumerate(selected):
-            progress.progress((idx + 1) / len(selected))
+            progress.progress(
+                (idx + 1) / n_sel,
+                text=f"加工中 {idx + 1} / {n_sel} 枚（取得・リサイズ・WebP変換）",
+            )
             photo = photos[i]
             img_bytes = fetch_image_bytes_cached(
                 photo["url"],
@@ -403,35 +434,51 @@ def main():
                 processed.append((i + 1, webp_bytes))
             except Exception:
                 pass
-        progress.empty()
+        progress.progress(1.0, text=f"完了（{len(processed)} 枚を出力）")
         st.session_state.processed_images = processed
-        st.session_state.processed_size_choice = size_choice
+        st.session_state.processed_size_choice = st.session_state.proc_size_choice
+        progress.empty()
         st.rerun()
 
     proc = st.session_state.processed_images
     size_used = st.session_state.get("processed_size_choice", "")
     if proc:
         st.success(f"{len(proc)} 枚を加工しました")
-        st.subheader("プレビュー")
+    else:
+        st.info("まだ加工結果がありません。上の「加工を実行」をクリックしてください。")
+
+    st.subheader("プレビュー")
+    if proc:
         prev_cols = st.columns(min(5, len(proc)))
         for idx, (num, img_bytes) in enumerate(proc):
             with prev_cols[idx % 5]:
                 st.image(Image.open(io.BytesIO(img_bytes)), use_container_width=True)
                 st.caption(f"#{num}")
+    else:
+        st.caption("加工が完了すると、ここにプレビューが表示されます。")
 
-        st.subheader("ZIPダウンロード（WebP形式・縦型約100KB/枚・横型約200KB/枚）")
-        file_prefix = "TOP_tate" if "縦型" in size_used else "TOP"
+    st.subheader("ZIPダウンロード（WebP形式・縦型約100KB/枚・横型約200KB/枚）")
+    file_prefix = "TOP_tate" if proc and "縦型" in size_used else "TOP"
+    if proc:
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for num, img_bytes in proc:
                 zf.writestr(f"{file_prefix}_{num}.webp", img_bytes)
         zip_buf.seek(0)
-
         st.download_button(
             "📦 全画像をZIPでダウンロード",
             data=zip_buf,
             file_name="processed_photos.zip",
             mime="application/zip",
+        )
+    else:
+        st.download_button(
+            "📦 全画像をZIPでダウンロード",
+            data=EMPTY_ZIP_BYTES,
+            file_name="processed_photos.zip",
+            mime="application/zip",
+            disabled=True,
+            help="先に「加工を実行」を完了させるとダウンロードできます。",
         )
 
 
